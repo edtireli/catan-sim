@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import BoardView from './BoardView'
 import TrainingDashboard from './TrainingDashboard'
+import SpectatorView from './SpectatorView'
 import { useGameSocket } from './useGameSocket'
 import type { ActionData, PlayerData } from './types'
 
@@ -20,7 +21,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   wool: 'Wool',
 }
 
-type Tab = 'play' | 'training'
+type Tab = 'play' | 'training' | 'spectate'
 
 export default function App() {
   const { connected, gameState, legalActions, log, newGame, performAction } = useGameSocket()
@@ -60,6 +61,14 @@ export default function App() {
             <div className="label">📊 Training Dashboard</div>
             <div className="desc">View AI training progress</div>
           </button>
+          <button
+            className="difficulty-btn"
+            onClick={() => setTab('spectate')}
+            style={{ fontSize: 14, padding: '12px 24px', marginLeft: 12 }}
+          >
+            <div className="label">🔴 Live Spectator</div>
+            <div className="desc">Watch AI train in real-time</div>
+          </button>
         </div>
         {!connected && (
           <p style={{ color: 'var(--accent)', marginTop: 16 }}>
@@ -74,16 +83,20 @@ export default function App() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
         <div className="tab-bar">
-          <button onClick={() => setTab('play')} className={tab === 'play' ? 'active' : ''}>
+          <button onClick={() => setTab('play')} className="">
             Play
           </button>
-          <button onClick={() => setTab('training')} className={tab === 'training' ? 'active' : ''}>
+          <button onClick={() => setTab('training')} className="active">
             Training
           </button>
         </div>
         <TrainingDashboard />
       </div>
     )
+  }
+
+  if (tab === 'spectate') {
+    return <SpectatorView onBack={() => setTab('play')} />
   }
 
   if (!gameState) return null

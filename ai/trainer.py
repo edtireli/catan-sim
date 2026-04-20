@@ -10,7 +10,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -96,6 +96,9 @@ class Trainer:
         self.writer: Optional[SummaryWriter] = None
         self.epoch_history: List[EpochStats] = []
 
+        # Optional spectator callback: called with (game_state, action, epoch, game_idx)
+        self.on_action: Optional[Callable] = None
+
     def train(self) -> None:
         """Run the full training loop."""
         os.makedirs(self.config.checkpoint_dir, exist_ok=True)
@@ -156,6 +159,10 @@ class Trainer:
                 action = agent.choose_action(gs)
                 apply_action(gs, action)
                 turn_count += 1
+
+                # Notify spectators
+                if self.on_action is not None:
+                    self.on_action(gs, action, epoch, game_idx)
 
             # Assign rewards
             for agent in agents:

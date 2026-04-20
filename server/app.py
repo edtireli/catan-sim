@@ -5,10 +5,12 @@ Serves the React frontend and handles game communication via WebSocket.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -193,7 +195,7 @@ def _serialize_game_state(gs: GameState, human_player: int) -> Dict:
     return {
         "board": _serialize_board(gs.board),
         "players": [
-            _serialize_player(p, is_self=(p.index == human_player))
+            _serialize_player(p, is_self=(p.index == human_player or human_player == -1))
             for p in gs.players
         ],
         "currentPlayer": gs.current_player_idx,
@@ -345,3 +347,139 @@ async def list_checkpoints():
             for f in sorted(cp_dir.glob("*.pt"))
         ]
     }
+
+
+# -----------------------------------------------------------------------
+# Live spectator mode — watch AI play during training
+# -----------------------------------------------------------------------
+
+spectator_clients: Set[WebSocket] = set()
+_spectator_loop: Optional[asyncio.AbstractEventLoop] = None
+_training_thread: Optional[threading.Thread] = None
+_training_status: Dict[str, Any] = {"running": False, "epoch": 0, "total_epochs": 0}
+
+
+async def _broadcast_to_spectators(message: dict) -> None:
+    """Send a message to all connected spectator clients."""
+    dead: List[WebSocket] = []
+    for ws in spectator_clients:
+        try:
+            await ws.send_json(message)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        spectator_clients.discard(ws)
+
+
+def _spectator_callback(gs, action, epoch: int, game_idx: int) -> None:
+    """Called from the trainer thread on each game action."""
+    if not spectator_clients or _spectator_loop is None:
+        return
+
+    # Serialize on the trainer thread (cheap), then push to event loop
+    state = _serialize_game_state(gs, human_player=-1)  # show all info
+    action_data = _serialize_action(action)
+
+    msg = {
+        "type": "spectate_state",
+        "state": state,
+        "lastAction": action_data,
+        "epoch": epoch,
+        "gameIdx": game_idx,
+    }
+
+    asyncio.run_coroutine_threadsafe(_broadcast_to_spectators(msg), _spectator_loop)
+
+
+def _run_training_in_thread(config_dict: dict) -> None:
+    """Run trainer in a background thread with spectator callback."""
+    global _training_status
+    from ai.trainer import Trainer, TrainingConfig
+
+    config = TrainingConfig(**config_dict)
+    trainer = Trainer(config)
+    trainer.on_action = _spectator_callback
+
+    _training_status = {"running": True, "epoch": 0, "total_epochs": config.num_epochs}
+
+    # Wrap _run_epoch to track progress
+    original_log = trainer._log_epoch
+
+    def _log_with_status(stats):
+        _training_status["epoch"] = stats.epoch
+        # Broadcast epoch summary to spectators
+        if _spectator_loop and spectator_clients:
+            summary = {
+                "type": "epoch_summary",
+                "epoch": stats.epoch,
+                "totalEpochs": config.num_epochs,
+                "gamesPlayed": stats.games_played,
+                "avgGameLength": round(stats.avg_game_length, 1),
+                "policyLoss": round(stats.policy_loss, 4),
+                "valueLoss": round(stats.value_loss, 4),
+                "entropy": round(stats.entropy, 4),
+                "wins": stats.wins,
+            }
+            asyncio.run_coroutine_threadsafe(
+                _broadcast_to_spectators(summary), _spectator_loop
+            )
+        original_log(stats)
+
+    trainer._log_epoch = _log_with_status
+
+    try:
+        trainer.train()
+    finally:
+        _training_status = {"running": False, "epoch": 0, "total_epochs": 0}
+
+
+@app.websocket("/ws/spectate")
+async def spectate_websocket(websocket: WebSocket):
+    """WebSocket for live spectating training games."""
+    global _spectator_loop
+    await websocket.accept()
+    spectator_clients.add(websocket)
+    _spectator_loop = asyncio.get_event_loop()
+
+    # Send current training status on connect
+    await websocket.send_json({"type": "training_status", **_training_status})
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+
+            if msg_type == "start_training":
+                if _training_status.get("running"):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Training already in progress",
+                    })
+                    continue
+
+                config_dict = {
+                    "num_epochs": data.get("epochs", 50),
+                    "games_per_epoch": data.get("gamesPerEpoch", 20),
+                    "checkpoint_interval": data.get("checkpointInterval", 10),
+                }
+
+                global _training_thread
+                _training_thread = threading.Thread(
+                    target=_run_training_in_thread,
+                    args=(config_dict,),
+                    daemon=True,
+                )
+                _training_thread.start()
+
+                await websocket.send_json({
+                    "type": "training_status",
+                    "running": True,
+                    "epoch": 0,
+                    "total_epochs": config_dict["num_epochs"],
+                })
+
+            elif msg_type == "get_status":
+                await websocket.send_json({"type": "training_status", **_training_status})
+
+    except WebSocketDisconnect:
+        spectator_clients.discard(websocket)
