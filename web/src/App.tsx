@@ -158,6 +158,29 @@ export default function App() {
           ))}
         </section>
 
+        {/* Building costs reference */}
+        <section>
+          <h3>Building Costs</h3>
+          <div className="cost-grid">
+            <div className="cost-row">
+              <span className="cost-label">🛤️ Road</span>
+              <span className="cost-chips">🧱 🪵</span>
+            </div>
+            <div className="cost-row">
+              <span className="cost-label">🏠 Settlement</span>
+              <span className="cost-chips">🧱 🪵 🌾 🐑</span>
+            </div>
+            <div className="cost-row">
+              <span className="cost-label">🏙️ City</span>
+              <span className="cost-chips">⛏️⛏️⛏️ 🌾🌾</span>
+            </div>
+            <div className="cost-row">
+              <span className="cost-label">🃏 Dev Card</span>
+              <span className="cost-chips">⛏️ 🌾 🐑</span>
+            </div>
+          </div>
+        </section>
+
         {/* Resources */}
         <section>
           <h3>Your Resources</h3>
@@ -184,16 +207,25 @@ export default function App() {
         </section>
 
         {/* Dev cards */}
-        {myPlayer.devCards && myPlayer.devCards.length > 0 && (
-          <section>
-            <h3>Development Cards</h3>
+        <section>
+          <h3>Development Cards {myPlayer.devCards && myPlayer.devCards.length > 0 ? `(${myPlayer.devCards.length})` : ''}</h3>
+          {myPlayer.devCards && myPlayer.devCards.length > 0 ? (
             <div className="dev-cards">
               {myPlayer.devCards.map((c, i) => (
                 <span key={i} className="dev-card-chip">{formatDevCard(c)}</span>
               ))}
             </div>
-          </section>
-        )}
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              No cards yet — buy with ⛏️ 🌾 🐑
+            </div>
+          )}
+          {myPlayer.newDevCards && myPlayer.newDevCards.length > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+              🆕 Bought this turn (playable next turn): {myPlayer.newDevCards.map(c => formatDevCard(c)).join(', ')}
+            </div>
+          )}
+        </section>
 
         {/* Actions */}
         {isMyTurn && legalActions.length > 0 && (
@@ -346,10 +378,10 @@ function groupActions(actions: ActionData[]): ActionGroup[] {
   const labels: Record<string, string> = {
     ROLL_DICE: '🎲 Roll Dice',
     END_TURN: '⏭️ End Turn',
-    BUILD_ROAD: '🛤️ Build Road',
-    BUILD_SETTLEMENT: '🏠 Build Settlement',
-    BUILD_CITY: '🏙️ Upgrade to City',
-    BUY_DEV_CARD: '🃏 Buy Dev Card',
+    BUILD_ROAD: '🛤️ Road (🧱🪵)',
+    BUILD_SETTLEMENT: '🏠 Settlement (🧱🪵🌾🐑)',
+    BUILD_CITY: '🏙️ City (⛏️×3 🌾×2)',
+    BUY_DEV_CARD: '🃏 Dev Card (⛏️🌾🐑)',
     PLAY_KNIGHT: '⚔️ Play Knight',
     PLAY_ROAD_BUILDING: '🛤️ Road Building',
     PLAY_YEAR_OF_PLENTY: '🎁 Year of Plenty',

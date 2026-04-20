@@ -119,6 +119,31 @@ body {
   font-weight: 700;
 }
 
+/* ---- Building costs ---- */
+.cost-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--surface);
+}
+
+.cost-label {
+  color: var(--text);
+}
+
+.cost-chips {
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
 /* ---- Actions ---- */
 .actions {
   display: flex;
