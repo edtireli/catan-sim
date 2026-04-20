@@ -13,6 +13,7 @@ env/
 # AI Training
 checkpoints/
 runs/
+replays/
 *.pt
 *.pth
 training_logs/

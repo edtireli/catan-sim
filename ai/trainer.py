@@ -148,7 +148,7 @@ class Trainer:
                 for i in range(NUM_PLAYERS)
             ]
 
-            recorder = GameRecorder(seed=seed, epoch=epoch, game_index=game_idx)
+            recorder = GameRecorder(seed=seed, epoch=epoch, game_idx=game_idx)
 
             turn_count = 0
             while gs.phase != GamePhase.GAME_OVER and turn_count < MAX_TURNS_PER_GAME:
