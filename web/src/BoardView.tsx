@@ -224,9 +224,18 @@ export default function BoardView({
         if (!hasBuilding && !isClickable) {
           // Show harbor indicator
           if (v.harbor) {
+            const label = v.harbor === 'generic' ? '3:1' : '2:1'
+            const color = v.harbor === 'generic' ? '#4ecdc4' : '#f39c12'
             return (
               <g key={`v-${v.id}`} transform={`translate(${v.px}, ${v.py})`}>
-                <circle r={4} fill="#4ecdc4" opacity={0.6} />
+                <circle r={10} fill={color} opacity={0.8} stroke="#000" strokeWidth={0.5} />
+                <text
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={7}
+                  fontWeight="bold"
+                  fill="#000"
+                >{label}</text>
               </g>
             )
           }

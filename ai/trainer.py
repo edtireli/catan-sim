@@ -20,6 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from catan.constants import GamePhase, NUM_PLAYERS
 from catan.game import GameState, apply_action, get_legal_actions, new_game
+from catan.replay import GameRecorder, save_replay
 from .agent import CatanAgent, Experience
 from .features import _ACTION_SPACE_SIZE, _STATE_FEATURE_SIZE
 from .network import CatanNetwork
@@ -147,6 +148,8 @@ class Trainer:
                 for i in range(NUM_PLAYERS)
             ]
 
+            recorder = GameRecorder(seed=seed, epoch=epoch, game_index=game_idx)
+
             turn_count = 0
             while gs.phase != GamePhase.GAME_OVER and turn_count < MAX_TURNS_PER_GAME:
                 pid = gs.current_player_idx
@@ -158,11 +161,17 @@ class Trainer:
 
                 action = agent.choose_action(gs)
                 apply_action(gs, action)
+                recorder.record(gs, action, pid)
                 turn_count += 1
 
                 # Notify spectators
                 if self.on_action is not None:
                     self.on_action(gs, action, epoch, game_idx)
+
+            # Save replay for won games
+            replay = recorder.finalize(gs)
+            if gs.winner is not None:
+                save_replay(replay)
 
             # Assign rewards
             for agent in agents:

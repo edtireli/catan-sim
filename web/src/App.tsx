@@ -2,6 +2,7 @@ import { useState } from 'react'
 import BoardView from './BoardView'
 import TrainingDashboard from './TrainingDashboard'
 import SpectatorView from './SpectatorView'
+import ReplayViewer from './ReplayViewer'
 import { useGameSocket } from './useGameSocket'
 import type { ActionData, PlayerData } from './types'
 
@@ -21,7 +22,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   wool: 'Wool',
 }
 
-type Tab = 'play' | 'training' | 'spectate'
+type Tab = 'play' | 'training' | 'spectate' | 'replay'
 
 export default function App() {
   const { connected, gameState, legalActions, log, newGame, performAction } = useGameSocket()
@@ -69,6 +70,14 @@ export default function App() {
             <div className="label">🔴 Live Spectator</div>
             <div className="desc">Watch AI train in real-time</div>
           </button>
+          <button
+            className="difficulty-btn"
+            onClick={() => setTab('replay')}
+            style={{ fontSize: 14, padding: '12px 24px', marginLeft: 12 }}
+          >
+            <div className="label">📼 Replays</div>
+            <div className="desc">Step through recorded games</div>
+          </button>
         </div>
         {!connected && (
           <p style={{ color: 'var(--accent)', marginTop: 16 }}>
@@ -97,6 +106,10 @@ export default function App() {
 
   if (tab === 'spectate') {
     return <SpectatorView onBack={() => setTab('play')} />
+  }
+
+  if (tab === 'replay') {
+    return <ReplayViewer onBack={() => setTab('play')} />
   }
 
   if (!gameState) return null
@@ -155,9 +168,19 @@ export default function App() {
                   <div style={{ fontSize: 20 }}>{RESOURCE_EMOJI[res]}</div>
                   <div className="count">{count}</div>
                   <div>{RESOURCE_LABELS[res]}</div>
+                  {myPlayer.tradeRatios && (
+                    <div style={{ fontSize: 10, color: myPlayer.tradeRatios[res] < 4 ? 'var(--accent)' : 'var(--text-dim)' }}>
+                      {myPlayer.tradeRatios[res]}:1
+                    </div>
+                  )}
                 </div>
               ))}
           </div>
+          {myPlayer.harbors && myPlayer.harbors.length > 0 && (
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 6 }}>
+              ⚓ Ports: {myPlayer.harbors.map(h => h === 'generic' ? '3:1' : `2:1 ${h}`).join(', ')}
+            </div>
+          )}
         </section>
 
         {/* Dev cards */}
@@ -205,7 +228,7 @@ export default function App() {
                       className="action-btn"
                       onClick={() => { performAction(a); setSelectedAction(null) }}
                     >
-                      {formatSubAction(a)}
+                      {formatSubAction(a, myPlayer.tradeRatios)}
                     </button>
                   ))}
               </div>
@@ -376,9 +399,10 @@ function formatDevCard(card: string): string {
   return map[card] || card
 }
 
-function formatSubAction(a: ActionData): string {
+function formatSubAction(a: ActionData, tradeRatios?: Record<string, number>): string {
   if (a.type === 'TRADE_BANK' && a.giveResource && a.getResource) {
-    return `${a.giveResource} → ${a.getResource}`
+    const ratio = tradeRatios?.[a.giveResource] ?? 4
+    return `${ratio}× ${RESOURCE_LABELS[a.giveResource] || a.giveResource} → ${RESOURCE_LABELS[a.getResource] || a.getResource}`
   }
   if (a.type === 'PLAY_YEAR_OF_PLENTY') {
     return `${a.resource}${a.resource2 ? ' + ' + a.resource2 : ''}`

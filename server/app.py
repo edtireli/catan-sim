@@ -183,11 +183,15 @@ def _serialize_player(player, is_self: bool = False) -> Dict:
         "longestRoadLength": player.longest_road_length,
         "totalResources": player.total_resources,
         "numDevCards": len(player.dev_cards) + len(player.new_dev_cards),
+        "harbors": [h.name.lower() for h in player.harbors],
     }
     if is_self:
         data["resources"] = {r.name.lower(): player.resources[r] for r in Resource}
         data["devCards"] = [c.name.lower() for c in player.dev_cards]
         data["newDevCards"] = [c.name.lower() for c in player.new_dev_cards]
+        # Trade ratios per resource (reflects harbors)
+        from catan.game import _trade_ratio
+        data["tradeRatios"] = {r.name.lower(): _trade_ratio(player, r) for r in Resource}
     return data
 
 
@@ -347,6 +351,80 @@ async def list_checkpoints():
             for f in sorted(cp_dir.glob("*.pt"))
         ]
     }
+
+
+# -----------------------------------------------------------------------
+# Replay endpoints — browse and step through recorded games
+# -----------------------------------------------------------------------
+
+from catan.replay import list_replays, load_replay, replay_to_state
+
+
+@app.get("/api/replays")
+async def get_replays():
+    """List available game replays."""
+    return {"replays": list_replays()}
+
+
+@app.get("/api/replays/{filename}")
+async def get_replay(filename: str):
+    """Load a full replay with all frames."""
+    path = Path("replays") / filename
+    if not path.exists() or not path.suffix == ".json":
+        return {"error": "Replay not found"}
+    replay = load_replay(str(path))
+    frames = []
+    for f in replay.frames:
+        fd: Dict[str, Any] = {
+            "player": f.player,
+            "actionType": f.action_type,
+            "phase": f.phase,
+            "turnNumber": f.turn_number,
+            "vps": f.vps,
+        }
+        if f.vertex is not None:
+            fd["vertex"] = f.vertex
+        if f.edge is not None:
+            fd["edge"] = f.edge
+        if f.hex_id is not None:
+            fd["hexId"] = f.hex_id
+        if f.target_player is not None:
+            fd["targetPlayer"] = f.target_player
+        if f.resource is not None:
+            fd["resource"] = f.resource
+        if f.resource2 is not None:
+            fd["resource2"] = f.resource2
+        if f.give_resource is not None:
+            fd["giveResource"] = f.give_resource
+        if f.get_resource is not None:
+            fd["getResource"] = f.get_resource
+        if f.dice_roll is not None:
+            fd["diceRoll"] = f.dice_roll
+        if f.discard is not None:
+            fd["discard"] = f.discard
+        frames.append(fd)
+    return {
+        "seed": replay.seed,
+        "winner": replay.winner,
+        "numTurns": replay.num_turns,
+        "finalVPs": replay.final_vps,
+        "epoch": replay.epoch,
+        "gameIdx": replay.game_idx,
+        "frames": frames,
+    }
+
+
+@app.get("/api/replays/{filename}/state/{frame_idx}")
+async def get_replay_state(filename: str, frame_idx: int):
+    """Reconstruct and return full game state at a specific frame."""
+    path = Path("replays") / filename
+    if not path.exists() or not path.suffix == ".json":
+        return {"error": "Replay not found"}
+    replay = load_replay(str(path))
+    if frame_idx < 0 or frame_idx > len(replay.frames):
+        return {"error": "Frame index out of range"}
+    gs = replay_to_state(replay, frame_idx)
+    return _serialize_game_state(gs, human_player=-1)
 
 
 # -----------------------------------------------------------------------

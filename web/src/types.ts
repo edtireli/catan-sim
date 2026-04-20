@@ -51,9 +51,11 @@ export interface PlayerData {
   longestRoadLength: number
   totalResources: number
   numDevCards: number
+  harbors: string[]
   resources?: Record<string, number>
   devCards?: string[]
   newDevCards?: string[]
+  tradeRatios?: Record<string, number>
 }
 
 export interface GameStateData {

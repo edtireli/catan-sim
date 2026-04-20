@@ -28,12 +28,16 @@ class StrategyProfile:
     games_played: int = 0
     wins: int = 0
     win_rate: float = 0.0
+    games_completed: int = 0  # games that reached 10 VP
 
-    # Average per winning game
+    # Average across all games (best-performing agent per game)
+    avg_vp: float = 0.0
+    avg_max_vp: float = 0.0  # highest VP reached in any game
+    avg_turns: float = 0.0
     avg_vp_at_win: float = 0.0
     avg_turns_to_win: float = 0.0
 
-    # Building patterns
+    # Building patterns (averaged across all games, best player)
     avg_settlements: float = 0.0
     avg_cities: float = 0.0
     avg_roads: float = 0.0
@@ -74,6 +78,9 @@ def analyze_strategy(
     terrain_counts: Dict[str, int] = {}
     number_counts: Dict[int, int] = {}
 
+    total_turns = 0
+    total_vp = 0
+    max_vps: List[int] = []
     total_turns_at_win = 0
     total_vp_at_win = 0
     total_settlements = 0
@@ -84,19 +91,19 @@ def analyze_strategy(
     longest_road_count = 0
     largest_army_count = 0
 
+    MAX_TURNS = 1000  # More generous for analysis
+
     for game_idx in range(num_games):
         gs = new_game(seed=game_idx + 10000)
         agents = [
-            CatanAgent(i, network, device, deterministic=True)
+            CatanAgent(i, network, device, deterministic=False)
             for i in range(NUM_PLAYERS)
         ]
 
-        # Track per-game actions for player 0
-        game_actions: Dict[str, int] = {}
         dev_bought = 0
 
         turn = 0
-        while gs.phase != GamePhase.GAME_OVER and turn < 500:
+        while gs.phase != GamePhase.GAME_OVER and turn < MAX_TURNS:
             pid = gs.current_player_idx
             legal = get_legal_actions(gs)
             if not legal:
@@ -108,54 +115,65 @@ def analyze_strategy(
             atype = action.action_type.name
             action_counts[atype] = action_counts.get(atype, 0) + 1
 
-            if pid == 0:
-                game_actions[atype] = game_actions.get(atype, 0) + 1
-                if action.action_type == ActionType.BUY_DEV_CARD:
-                    dev_bought += 1
+            if action.action_type == ActionType.BUY_DEV_CARD:
+                dev_bought += 1
 
             apply_action(gs, action)
             turn += 1
 
         profile.games_played += 1
+        total_turns += turn
 
+        # Find best player this game (winner, or highest VP)
         if gs.winner is not None:
-            winner = gs.players[gs.winner]
-            if gs.winner == 0:  # Track player 0 stats
-                profile.wins += 1
-                total_turns_at_win += turn
-                total_vp_at_win += winner.victory_points
-                total_settlements += winner.num_settlements
-                total_cities += winner.num_cities
-                total_roads += winner.num_roads
-                total_knights += winner.knights_played
-                total_dev_bought += dev_bought
-                if winner.has_longest_road:
-                    longest_road_count += 1
-                if winner.has_largest_army:
-                    largest_army_count += 1
+            best = gs.players[gs.winner]
+            profile.games_completed += 1
+            profile.wins += 1
+            total_turns_at_win += turn
+            total_vp_at_win += best.victory_points
+        else:
+            best = max(gs.players, key=lambda p: p.victory_points)
 
-                # Track settlement locations
-                for vid in winner.settlement_vertices | winner.city_vertices:
-                    v = gs.board.vertices[vid]
-                    for hid in v.adjacent_hexes:
-                        h = gs.board.hexes[hid]
-                        tname = h.terrain.name.lower()
-                        terrain_counts[tname] = terrain_counts.get(tname, 0) + 1
-                        if h.number > 0:
-                            number_counts[h.number] = number_counts.get(h.number, 0) + 1
+        max_vps.append(best.victory_points)
+        total_vp += best.victory_points
+        total_settlements += best.num_settlements
+        total_cities += best.num_cities
+        total_roads += best.num_roads
+        total_knights += best.knights_played
+        total_dev_bought += dev_bought  # across all players
+        if best.has_longest_road:
+            longest_road_count += 1
+        if best.has_largest_army:
+            largest_army_count += 1
+
+        # Track settlement locations for all players' buildings
+        for player in gs.players:
+            for vid in player.settlement_vertices | player.city_vertices:
+                v = gs.board.vertices[vid]
+                for hid in v.adjacent_hexes:
+                    h = gs.board.hexes[hid]
+                    tname = h.terrain.name.lower()
+                    terrain_counts[tname] = terrain_counts.get(tname, 0) + 1
+                    if h.number > 0:
+                        number_counts[h.number] = number_counts.get(h.number, 0) + 1
 
     # Compute averages
+    n = profile.games_played or 1
+    profile.win_rate = profile.wins / n
+    profile.avg_vp = total_vp / n
+    profile.avg_max_vp = max(max_vps) if max_vps else 0
+    profile.avg_turns = total_turns / n
+    profile.avg_settlements = total_settlements / n
+    profile.avg_cities = total_cities / n
+    profile.avg_roads = total_roads / n
+    profile.avg_knights_played = total_knights / n
+    profile.avg_dev_cards_bought = total_dev_bought / n
+    profile.pct_longest_road = longest_road_count / n
+    profile.pct_largest_army = largest_army_count / n
+
     if profile.wins > 0:
-        profile.win_rate = profile.wins / profile.games_played
         profile.avg_turns_to_win = total_turns_at_win / profile.wins
         profile.avg_vp_at_win = total_vp_at_win / profile.wins
-        profile.avg_settlements = total_settlements / profile.wins
-        profile.avg_cities = total_cities / profile.wins
-        profile.avg_roads = total_roads / profile.wins
-        profile.avg_knights_played = total_knights / profile.wins
-        profile.avg_dev_cards_bought = total_dev_bought / profile.wins
-        profile.pct_longest_road = longest_road_count / profile.wins
-        profile.pct_largest_army = largest_army_count / profile.wins
 
     total_actions = sum(action_counts.values()) or 1
     profile.action_distribution = {
@@ -181,15 +199,20 @@ def print_strategy_report(profile: StrategyProfile) -> None:
     print("STRATEGY ANALYSIS REPORT")
     print("=" * 60)
     print(f"Games played: {profile.games_played}")
-    print(f"Win rate: {profile.win_rate:.1%}")
+    print(f"Games completed (10 VP): {profile.games_completed}")
+    print(f"Completion rate: {profile.win_rate:.1%}")
     print()
 
-    print("--- Victory Pattern ---")
-    print(f"Avg VP at win: {profile.avg_vp_at_win:.1f}")
-    print(f"Avg turns to win: {profile.avg_turns_to_win:.0f}")
+    print("--- Performance ---")
+    print(f"Avg VP (best player): {profile.avg_vp:.1f}")
+    print(f"Max VP reached: {profile.avg_max_vp:.0f}")
+    print(f"Avg game length: {profile.avg_turns:.0f} turns")
+    if profile.wins > 0:
+        print(f"Avg VP at win: {profile.avg_vp_at_win:.1f}")
+        print(f"Avg turns to win: {profile.avg_turns_to_win:.0f}")
     print()
 
-    print("--- Building Pattern ---")
+    print("--- Building Pattern (best player avg) ---")
     print(f"Avg settlements: {profile.avg_settlements:.1f}")
     print(f"Avg cities: {profile.avg_cities:.1f}")
     print(f"Avg roads: {profile.avg_roads:.1f}")
@@ -218,3 +241,73 @@ def print_strategy_report(profile: StrategyProfile) -> None:
                               key=lambda x: -x[1])[:10]:
         print(f"  {action:25s}: {pct:.2%}")
     print("=" * 60)
+
+
+def compare_checkpoints(checkpoint_paths: List[str], num_games: int = 100) -> None:
+    """Compare strategy profiles across multiple checkpoints to show learning progression."""
+    profiles = []
+    for path in checkpoint_paths:
+        label = Path(path).stem.replace("catan_agent_", "")
+        print(f"Evaluating {label}...")
+        p = analyze_strategy(path, num_games=num_games)
+        profiles.append((label, p))
+
+    print()
+    print("=" * 70)
+    print("TRAINING PROGRESSION")
+    print("=" * 70)
+
+    # Header
+    labels = [lbl for lbl, _ in profiles]
+    header = f"{'Metric':<28s}" + "".join(f"{l:>12s}" for l in labels)
+    print(header)
+    print("-" * len(header))
+
+    # Rows
+    def row(name: str, get_val, fmt: str = ".1f"):
+        vals = [get_val(p) for _, p in profiles]
+        line = f"{name:<28s}" + "".join(f"{v:>12{fmt}}" for v in vals)
+        print(line)
+
+    row("Win rate (%)", lambda p: p.win_rate * 100)
+    row("Avg turns to win", lambda p: p.avg_turns_to_win, ".0f")
+    row("Avg VP at win", lambda p: p.avg_vp_at_win)
+    row("Avg settlements", lambda p: p.avg_settlements)
+    row("Avg cities", lambda p: p.avg_cities)
+    row("Avg roads", lambda p: p.avg_roads)
+    row("Avg dev cards bought", lambda p: p.avg_dev_cards_bought)
+    row("Avg knights played", lambda p: p.avg_knights_played)
+    row("Longest road wins (%)", lambda p: p.pct_longest_road * 100)
+    row("Largest army wins (%)", lambda p: p.pct_largest_army * 100)
+
+    # Key strategic shifts
+    print()
+    print("--- Key Insights ---")
+    first = profiles[0][1]
+    last = profiles[-1][1]
+    if last.win_rate > first.win_rate:
+        print(f"  ✓ Win rate improved: {first.win_rate:.1%} → {last.win_rate:.1%}")
+    if last.avg_turns_to_win < first.avg_turns_to_win and last.avg_turns_to_win > 0:
+        print(f"  ✓ Faster wins: {first.avg_turns_to_win:.0f} → {last.avg_turns_to_win:.0f} turns")
+    if last.avg_cities > first.avg_cities:
+        print(f"  ✓ More city upgrades: {first.avg_cities:.1f} → {last.avg_cities:.1f}")
+    if last.pct_largest_army > first.pct_largest_army:
+        print(f"  ✓ More army-focused: {first.pct_largest_army:.1%} → {last.pct_largest_army:.1%}")
+    if last.pct_longest_road > first.pct_longest_road:
+        print(f"  ✓ More road-focused: {first.pct_longest_road:.1%} → {last.pct_longest_road:.1%}")
+
+    # Dominant strategy
+    if last.win_rate > 0:
+        if last.pct_largest_army > 0.4:
+            strat = "Army Builder (knight-heavy)"
+        elif last.pct_longest_road > 0.4:
+            strat = "Road Runner (road-heavy)"
+        elif last.avg_cities > 2.5:
+            strat = "City Developer (ore/grain focus)"
+        elif last.avg_settlements > 4:
+            strat = "Wide Settler (spread out)"
+        else:
+            strat = "Balanced"
+        print(f"\n  Dominant strategy at latest checkpoint: {strat}")
+
+    print("=" * 70)
